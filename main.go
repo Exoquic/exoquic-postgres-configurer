@@ -104,7 +104,7 @@ func validateConfig(config Config) error {
 // Connect to PostgreSQL with retry logic
 func connectWithRetry(config Config) (*sql.DB, error) {
 	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=prefer",
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.PGHost, config.PGPort, config.PGUser, config.PGPassword, config.PGDatabase,
 	)
 
@@ -654,14 +654,8 @@ func main() {
 		}
 	}
 
-	// Print final output
 	log.Println("Configuration complete!")
 	fmt.Println("\n" + output.String())
-
-	// Keep the service running for Railway logs (just for a short time)
 	log.Println("Configuration successful. Service will exit in 5 minutes.")
 	log.Println("You can safely deploy this Railway service again when needed.")
-
-	// Sleep to keep logs viewable in Railway
-	time.Sleep(5 * time.Minute)
 }

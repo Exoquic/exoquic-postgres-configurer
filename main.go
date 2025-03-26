@@ -143,11 +143,12 @@ func checkSuperuserPrivileges(db *sql.DB) (bool, error) {
 	return isSuperuser, nil
 }
 
-// Check current WAL configuration
-func checkWALConfiguration(db *sql.DB) (string, error) {
+// Configure WAL settings for logical replication
+func configureWAL(db *sql.DB) (string, error) {
 	var result strings.Builder
+	var restartRequired bool
 
-	// Check wal_level
+	// Check and set wal_level
 	var walLevel string
 	err := db.QueryRow("SHOW wal_level").Scan(&walLevel)
 	if err != nil {
@@ -155,12 +156,20 @@ func checkWALConfiguration(db *sql.DB) (string, error) {
 	}
 
 	if walLevel != "logical" {
-		result.WriteString(fmt.Sprintf("WARNING: wal_level is currently '%s'. Should be set to 'logical'.\n", walLevel))
+		_, err = db.Exec("ALTER SYSTEM SET wal_level = 'logical'")
+		if err != nil {
+			result.WriteString(fmt.Sprintf("ERROR: Failed to set wal_level to logical: %v\n", err))
+		} else {
+			// Reload pg configs so that we can modify the replication slots.
+			db.Exec("SELECT pg_reload_conf()")
+			result.WriteString(fmt.Sprintf("CHANGED: wal_level from '%s' to 'logical'.\n", walLevel))
+			restartRequired = true
+		}
 	} else {
 		result.WriteString("INFO: wal_level is correctly set to logical.\n")
 	}
 
-	// Check max_replication_slots
+	// Check and set max_replication_slots
 	var maxReplicationSlots int
 	err = db.QueryRow("SHOW max_replication_slots").Scan(&maxReplicationSlots)
 	if err != nil {
@@ -168,12 +177,18 @@ func checkWALConfiguration(db *sql.DB) (string, error) {
 	}
 
 	if maxReplicationSlots < 5 {
-		result.WriteString(fmt.Sprintf("WARNING: max_replication_slots is %d. Recommend at least 5.\n", maxReplicationSlots))
+		_, err = db.Exec("ALTER SYSTEM SET max_replication_slots = '5'")
+		if err != nil {
+			result.WriteString(fmt.Sprintf("ERROR: Failed to set max_replication_slots to 5: %v\n", err))
+		} else {
+			result.WriteString(fmt.Sprintf("CHANGED: max_replication_slots from %d to 5.\n", maxReplicationSlots))
+			restartRequired = true
+		}
 	} else {
 		result.WriteString(fmt.Sprintf("INFO: max_replication_slots is sufficient: %d.\n", maxReplicationSlots))
 	}
 
-	// Check max_wal_senders
+	// Check and set max_wal_senders
 	var maxWalSenders int
 	err = db.QueryRow("SHOW max_wal_senders").Scan(&maxWalSenders)
 	if err != nil {
@@ -181,13 +196,32 @@ func checkWALConfiguration(db *sql.DB) (string, error) {
 	}
 
 	if maxWalSenders < 5 {
-		result.WriteString(fmt.Sprintf("WARNING: max_wal_senders is %d. Recommend at least 5.\n", maxWalSenders))
+		_, err = db.Exec("ALTER SYSTEM SET max_wal_senders = '5'")
+		if err != nil {
+			result.WriteString(fmt.Sprintf("ERROR: Failed to set max_wal_senders to 5: %v\n", err))
+		} else {
+			result.WriteString(fmt.Sprintf("CHANGED: max_wal_senders from %d to 5.\n", maxWalSenders))
+			restartRequired = true
+		}
 	} else {
 		result.WriteString(fmt.Sprintf("INFO: max_wal_senders is sufficient: %d.\n", maxWalSenders))
 	}
 
-	result.WriteString("NOTE: Changes to these settings require modifying postgresql.conf and restarting the server.\n")
-	result.WriteString("For Railway.app, you may need to contact support to adjust these settings.\n")
+	// Apply changes if any were made
+	if restartRequired {
+		_, err = db.Exec("SELECT pg_reload_conf()")
+		if err != nil {
+			result.WriteString(fmt.Sprintf("ERROR: Failed to reload PostgreSQL configuration: %v\n", err))
+		} else {
+			result.WriteString("\nINFO: PostgreSQL configuration reloaded.\n")
+		}
+
+		result.WriteString("\nWARNING: Some changes require a server restart to take effect.\n")
+		result.WriteString("To restart PostgreSQL, you may need to run:\n")
+		result.WriteString("  - For systemd: sudo systemctl restart postgresql\n")
+		result.WriteString("  - For Docker: docker restart <container_name>\n")
+		result.WriteString("  - For Railway.app: Redeploy the PostgreSQL service\n")
+	}
 
 	return result.String(), nil
 }
@@ -539,9 +573,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Set a timeout for operations
-	//_, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	//defer cancel()
 	db.SetConnMaxLifetime(time.Minute * 3)
 
 	// Check superuser privileges
@@ -551,19 +582,18 @@ func main() {
 	}
 
 	if !isSuperuser {
-		log.Println("Warning: Current user does not have superuser privileges.")
-		log.Println("Some operations may fail. For Railway.app, this is expected.")
-		log.Println("Continuing anyway with best-effort configuration...")
+		log.Println("ERROR: Current user does not have superuser privileges.")
+		os.Exit(1)
 	}
 
 	var output strings.Builder
 	output.WriteString("Exoquic PostgreSQL Configuration Report\n")
 	output.WriteString("=====================================\n\n")
 
-	// Check WAL configuration
-	walConfig, err := checkWALConfiguration(db)
+	// Configure WAL settings
+	walConfig, err := configureWAL(db)
 	if err != nil {
-		log.Printf("Warning: Error checking WAL configuration: %v", err)
+		log.Printf("Warning: Error configuring WAL settings: %v", err)
 	} else {
 		output.WriteString("WAL Configuration:\n")
 		output.WriteString("------------------\n")

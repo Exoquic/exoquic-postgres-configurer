@@ -571,7 +571,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to PostgreSQL: %v", err)
 	}
-	defer db.Close()
 
 	db.SetConnMaxLifetime(time.Minute * 3)
 
@@ -660,6 +659,43 @@ func main() {
 	} else {
 		output.WriteString(tableCheck)
 		output.WriteString("\n")
+	}
+
+	// Close the connection here
+	db.Close()
+
+	// TODO: Repeatedly reconnect and check whether the WAL settings have changed every 3 seconds.
+	// Add replication slot if it has.
+	fmt.Println("Modified wal_level, please restart the postgres server to continue.")
+	for {
+		db, err = connectWithRetry(config)
+
+		if err != nil {
+			fmt.Printf("Could not connect to database, retrying..")
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		var walLevel string
+		err := db.QueryRow("SHOW wal_level").Scan(&walLevel)
+		if err != nil {
+			fmt.Printf("failed to check wal_level: %v\n", err)
+		} else if walLevel != "logical" {
+			fmt.Printf("WAL level is not 'logical', please restart your postgres server for the changes to the WAL level to apply.\n")
+		} else if walLevel == "logical" {
+			slotResult, err := createReplicationSlot(db, config.SlotName)
+			if err != nil {
+				log.Printf("Warning: Error creating replication slot: %v", err)
+			} else {
+				output.WriteString("Replication Slot:\n")
+				output.WriteString("----------------\n")
+				output.WriteString(slotResult)
+				output.WriteString("\n")
+				break
+			}
+		}
+		db.Close()
+		time.Sleep(3 * time.Second)
 	}
 
 	// Generate connection info

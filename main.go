@@ -408,7 +408,8 @@ Username: %s
 Replication Slot: %s
 Publication: %s
 
-Use these details to configure your Exoquic agent.
+Success!
+Exoquic is now connected to your database!
 `, listenAddresses, port, config.PGDatabase, config.ReplicationUser, config.SlotName, config.PublicationName)
 
 	return connectionInfo, nil

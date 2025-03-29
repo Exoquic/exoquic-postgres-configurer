@@ -477,9 +477,9 @@ func registerWithExoquic(config Config, connectionInfo string) (string, error) {
 		Database        string `json:"database"`
 		Username        string `json:"username"`
 		Password        string `json:"password"`
-		ReplicationSlot string `json:"replication_slot"`
+		ReplicationSlot string `json:"replicationSlot"`
 		Publication     string `json:"publication"`
-		ApiKey          string `json:"api_key"`
+		ApiKey          string `json:"apiKey"`
 	}
 
 	connDetails := ConnectionDetails{

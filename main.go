@@ -32,8 +32,9 @@ type Config struct {
 	TablesToCapture     []string // Empty means all tables
 
 	// Exoquic cloud connection
-	ExoquicAPIKey   string
-	ExoquicCloudURL string
+	ExoquicAPIKey      string
+	ExoquicCloudURL    string
+	ExoquicEnvironment string // Dev or prod
 }
 
 func loadConfig() Config {
@@ -50,6 +51,7 @@ func loadConfig() Config {
 		SlotName:            os.Getenv("EXOQUIC_SLOT_NAME"),
 		ExoquicAPIKey:       os.Getenv("EXOQUIC_API_KEY"),
 		ExoquicCloudURL:     os.Getenv("EXOQUIC_CLOUD_URL"),
+		ExoquicEnvironment:  os.Getenv("EXOQUIC_ENV"),
 	}
 
 	// Set defaults for empty values
@@ -97,6 +99,12 @@ func validateConfig(config Config) error {
 	}
 	if config.ReplicationPassword == "" {
 		return fmt.Errorf("EXOQUIC_REPLICATION_PASSWORD environment variable is required")
+	}
+	if config.ExoquicAPIKey == "" {
+		return fmt.Errorf("EXOQUIC_API_KEY environment variable is required")
+	}
+	if config.ExoquicEnvironment != "dev" && config.ExoquicEnvironment != "prod" {
+		return fmt.Errorf("EXOQUIC_ENV environment variable is required and must either be 'dev' or 'prod'")
 	}
 	return nil
 }
@@ -480,6 +488,7 @@ func registerWithExoquic(config Config, connectionInfo string) (string, error) {
 		ReplicationSlot string `json:"replicationSlot"`
 		Publication     string `json:"publication"`
 		ApiKey          string `json:"apiKey"`
+		Environment     string `json:"environment"`
 	}
 
 	connDetails := ConnectionDetails{
@@ -491,6 +500,7 @@ func registerWithExoquic(config Config, connectionInfo string) (string, error) {
 		ReplicationSlot: config.SlotName,
 		Publication:     config.PublicationName,
 		ApiKey:          config.ExoquicAPIKey,
+		Environment:     config.ExoquicEnvironment,
 	}
 
 	// Convert to JSON
@@ -499,9 +509,9 @@ func registerWithExoquic(config Config, connectionInfo string) (string, error) {
 		return "", fmt.Errorf("failed to serialize connection details: %v", err)
 	}
 
-	// Send to Exoquic API
-	apiURL := "https://db.exoquic.com/api/postgres"
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+	// Send to Exoquic
+	apiURL := "http://localhost:9090/api/v1/postgres/connection"
+	req, err := http.NewRequest("PUT", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("failed to create API request: %v", err)
 	}
@@ -521,7 +531,7 @@ func registerWithExoquic(config Config, connectionInfo string) (string, error) {
 		return "", fmt.Errorf("API registration failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	return fmt.Sprintf("Successfully registered database with Exoquic"), nil
+	return "Successfully registered database with Exoquic", nil
 }
 
 // Create Exoquic schema and functions
@@ -708,17 +718,14 @@ func main() {
 		output.WriteString("\n")
 	}
 
-	// Register with Exoquic cloud if API key is provided
-	if config.ExoquicAPIKey != "" {
-		cloudResult, err := registerWithExoquic(config, connectionInfo)
-		if err != nil {
-			log.Printf("Warning: Error registering with Exoquic cloud: %v", err)
-		} else {
-			output.WriteString("Exoquic Cloud Registration:\n")
-			output.WriteString("--------------------------\n")
-			output.WriteString(cloudResult)
-			output.WriteString("\n")
-		}
+	cloudResult, err := registerWithExoquic(config, connectionInfo)
+	if err != nil {
+		log.Printf("Warning: Error registering with Exoquic cloud: %v", err)
+	} else {
+		output.WriteString("Exoquic Cloud Registration:\n")
+		output.WriteString("--------------------------\n")
+		output.WriteString(cloudResult)
+		output.WriteString("\n")
 	}
 
 	log.Println("Configuration complete!")

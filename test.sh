@@ -4,7 +4,6 @@ set -e
 # Start PostgreSQL container with default settings
 docker run --name exoquic-postgres \
   --network host \
-	--rm \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=exoquic_test \
@@ -35,6 +34,7 @@ PGPASSWORD=postgres \
 PGDATABASE=exoquic_test \
 EXOQUIC_REPLICATION_USER=exoquic_user \
 EXOQUIC_REPLICATION_PASSWORD=exoquic_password \
+EXOQUIC_API_KEY= \
 go run main.go
 
 echo "Done. To clean up, run: docker stop exoquic-postgres && docker rm exoquic-postgres"
